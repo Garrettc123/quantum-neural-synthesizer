@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quantum-neural-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://quantum:quantum123@postgres:5432/quantumdb
+      - REDIS_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ENVIRONMENT=production
+    depends_on:
+      - postgres
+      - redis
+      - prometheus
+    networks:
+      - quantum-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: quantum-postgres
+    environment:
+      - POSTGRES_DB=quantumdb
+      - POSTGRES_USER=quantum
+      - POSTGRES_PASSWORD=quantum123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - quantum-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantum"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: quantum-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - quantum-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: quantum-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - quantum-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: quantum-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - quantum-network
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  quantum-network:
+    driver: bridge
